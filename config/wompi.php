@@ -21,11 +21,25 @@ return [
     /*
      | The Web Checkout endpoint the pay button redirects to.
      |
-     | The public docs only cover https://checkout.wompi.co/p/. The UAT host
-     | below mirrors the UAT API host but is unverified, so it is overridable
-     | from the environment: if paying lands on a 404, correct it there.
+     | The public docs only cover https://checkout.wompi.co/p/, but the UAT host
+     | below is confirmed working and is the one that pairs with stagtest_ keys.
+     | A 403 here is not a wrong host: both hosts sit behind the same WAF, and
+     | both reject the request when "redirect-url" names a loopback or private
+     | address. See "redirect_url" below.
      */
     'checkout_url' => env('WOMPI_CHECKOUT_URL', 'https://checkout.co.uat.wompi.dev/p/'),
+
+    /*
+     | Where Wompi returns the customer after payment. Defaults to the
+     | checkout.result route on whichever host the request came in on.
+     |
+     | Wompi's WAF rejects loopback and private-network hosts, so this must
+     | resolve to a publicly shaped hostname -- browsing the app at
+     | http://localhost:8000 produces a redirect-url that Wompi answers with a
+     | CloudFront 403. Point this at a tunnel when Wompi has to reach a machine
+     | that is not publicly addressable.
+     */
+    'redirect_url' => env('WOMPI_REDIRECT_URL'),
 
     'public_key' => env('WOMPI_PUBLIC_KEY'),
 

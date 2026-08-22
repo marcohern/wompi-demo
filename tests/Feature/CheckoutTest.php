@@ -6,7 +6,9 @@ use App\Models\CartItem;
 use App\Models\Order;
 use App\Models\Product;
 use App\Models\User;
+use App\Services\WompiGateway;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\URL;
 use Inertia\Testing\AssertableInertia as Assert;
 
 beforeEach(function () {
@@ -15,6 +17,11 @@ beforeEach(function () {
     config()->set('wompi.integrity_secret', 'stagtest_integrity_secret');
     config()->set('wompi.events_secret', 'stagtest_events_secret');
     config()->set('wompi.currency', 'COP');
+    config()->set('wompi.redirect_url', null);
+
+    // The test suite's default host is "localhost", which Wompi's WAF rejects.
+    // Serve these tests from the same shape of hostname the app is browsed at.
+    URL::forceRootUrl('http://wompi.localhost:8000');
 
     // Inertia SSR would otherwise call the dev server over HTTP, which both
     // slows these tests down and trips the stray request guard below.
@@ -214,6 +221,65 @@ test('an inertia pay request returns a location redirect to wompi', function () 
         ->and($query['signature:integrity'])->toBe(
             hash('sha256', $order->reference.'20000000'.'COP'.'stagtest_integrity_secret'),
         );
+});
+
+/*
+ | Wompi puts Web Checkout behind a WAF that blocks any redirect-url naming a
+ | loopback or private-network host and answers with a bare CloudFront 403.
+ | Running the app at http://localhost:8000 produced exactly that, so the
+ | gateway rejects such an address up front instead of letting Wompi do it.
+ */
+test('a loopback redirect url is rejected before reaching wompi', function (string $redirectUrl) {
+    $order = Order::factory()->create([
+        'reference' => 'WOMPI-TEST',
+        'amount_in_cents' => 20_000_000,
+        'currency' => 'COP',
+    ]);
+
+    expect(fn () => app(WompiGateway::class)->checkoutUrl($order, $redirectUrl))
+        ->toThrow(InvalidArgumentException::class);
+})->with([
+    'localhost' => 'http://localhost:8000/checkout/result',
+    'loopback ip' => 'http://127.0.0.1:8000/checkout/result',
+    'private lan ip' => 'http://192.168.1.50:8000/checkout/result',
+    'no host' => '/checkout/result',
+]);
+
+test('a non loopback redirect url is accepted', function (string $redirectUrl) {
+    $order = Order::factory()->create([
+        'reference' => 'WOMPI-TEST',
+        'amount_in_cents' => 20_000_000,
+        'currency' => 'COP',
+    ]);
+
+    $target = app(WompiGateway::class)->checkoutUrl($order, $redirectUrl);
+
+    parse_str((string) parse_url($target, PHP_URL_QUERY), $query);
+
+    expect($query['redirect-url'])->toBe($redirectUrl);
+})->with([
+    // A subdomain of localhost resolves to 127.0.0.1 in the browser but passes
+    // the WAF, which is why the app is browsed there rather than at localhost.
+    'localhost subdomain' => 'http://wompi.localhost:8000/checkout/result',
+    'tunnel' => 'https://abc123.ngrok-free.app/checkout/result',
+]);
+
+test('the configured redirect url overrides the route', function () {
+    config()->set('wompi.redirect_url', 'https://abc123.ngrok-free.app/checkout/result');
+
+    $user = User::factory()->create();
+    cartWith($user, 100_000, 2);
+
+    $response = $this->actingAs($user)
+        ->withHeaders(['X-Inertia' => 'true'])
+        ->post(route('checkout.pay'));
+
+    $target = $response->headers->get('X-Inertia-Location');
+
+    parse_str((string) parse_url((string) $target, PHP_URL_QUERY), $query);
+
+    expect($query['redirect-url'])->toBe('https://abc123.ngrok-free.app/checkout/result')
+        ->and($query['redirect-url'])->not->toBe(route('checkout.result'));
 });
 
 test('an inertia pay request still records the order and its snapshot', function () {

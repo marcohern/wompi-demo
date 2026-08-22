@@ -6,6 +6,7 @@ use App\Models\Order;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use InvalidArgumentException;
 use Throwable;
 
 class WompiGateway
@@ -27,10 +28,61 @@ class WompiGateway
                 $order->amount_in_cents,
                 $order->currency,
             ),
-            'redirect-url' => $redirectUrl,
+            'redirect-url' => $this->redirectUrl($redirectUrl),
         ]);
 
         return rtrim((string) config('wompi.checkout_url'), '?').'?'.$query;
+    }
+
+    /**
+     * Resolve the address Wompi returns the customer to.
+     *
+     * The configured override wins so the return trip can be pointed at a
+     * tunnel without moving the host the app is browsed at.
+     *
+     * @throws InvalidArgumentException when the address would be rejected by Wompi
+     */
+    private function redirectUrl(string $fallback): string
+    {
+        $configured = config('wompi.redirect_url');
+        $url = is_string($configured) && $configured !== '' ? $configured : $fallback;
+
+        $this->assertReachableByWompi($url);
+
+        return $url;
+    }
+
+    /**
+     * Fail loudly on a redirect address Wompi's WAF will not accept.
+     *
+     * Wompi fronts Web Checkout with a WAF that blocks "redirect-url" values
+     * naming a loopback or private-network host, and answers the whole checkout
+     * request with an opaque CloudFront 403 rather than a useful error. Catching
+     * it here turns that into something readable. Note that "wompi.localhost"
+     * is accepted while a bare "localhost" is not, so the host is matched
+     * exactly rather than by suffix.
+     *
+     * @throws InvalidArgumentException
+     */
+    private function assertReachableByWompi(string $url): void
+    {
+        $host = parse_url($url, PHP_URL_HOST);
+
+        if (! is_string($host) || $host === '') {
+            throw new InvalidArgumentException("Wompi redirect URL [{$url}] has no host.");
+        }
+
+        $isLoopbackName = strcasecmp($host, 'localhost') === 0;
+        $isIp = filter_var($host, FILTER_VALIDATE_IP) !== false;
+        $isPublicIp = filter_var($host, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) !== false;
+
+        if ($isLoopbackName || ($isIp && ! $isPublicIp)) {
+            throw new InvalidArgumentException(
+                "Wompi rejects a redirect URL on [{$host}] with a CloudFront 403. ".
+                'Browse the app at a non-loopback hostname such as http://wompi.localhost:8000 '.
+                '(set APP_URL to match), or set WOMPI_REDIRECT_URL to a publicly reachable URL.'
+            );
+        }
     }
 
     /**
