@@ -2,7 +2,6 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\Cart;
 use App\Models\CartItem;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -15,11 +14,7 @@ class CartController extends Controller
      */
     public function index(Request $request): Response
     {
-        $cart = $request->user()->cart;
-
-        $items = $cart instanceof Cart
-            ? $cart->items()->with('product')->oldest('id')->get()
-            : collect();
+        $items = $request->user()->cartItems();
 
         return Inertia::render('cart/index', [
             'items' => $items

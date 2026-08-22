@@ -16,7 +16,7 @@ class CartItemController extends Controller
      */
     public function store(CartItemStoreRequest $request): RedirectResponse
     {
-        $cart = $request->user()->cart()->firstOrCreate();
+        $cart = $request->user()->currentCart();
 
         $item = $cart->items()->firstOrNew([
             'product_id' => $request->validated('product_id'),

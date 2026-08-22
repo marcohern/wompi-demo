@@ -52,6 +52,39 @@ class User extends Authenticatable implements PasskeyUser
     }
 
     /**
+     * Get the user's cart, creating it on first use.
+     *
+     * Every read and write path resolves the cart through this method so a
+     * reader and a writer can never disagree about which cart is current.
+     * A user owns at most one cart: carts.user_id is unique, and
+     * firstOrCreate() recovers by re-querying if a concurrent request wins
+     * the race to insert it.
+     */
+    public function currentCart(): Cart
+    {
+        return $this->cart()->firstOrCreate();
+    }
+
+    /**
+     * Get every line in the user's cart, with products eager loaded.
+     *
+     * Used by the read paths so they never create a cart just to render one,
+     * and so the empty-cart case is handled in one place.
+     *
+     * @return Collection<int, CartItem>
+     */
+    public function cartItems(): Collection
+    {
+        $cart = $this->cart;
+
+        if (! $cart instanceof Cart) {
+            return new Collection;
+        }
+
+        return $cart->items()->with('product')->oldest('id')->get();
+    }
+
+    /**
      * Get the user's delivery addresses.
      *
      * @return HasMany<Address, $this>
