@@ -2,6 +2,8 @@
 
 use App\Http\Controllers\Settings\AddressController;
 use App\Http\Controllers\Settings\DefaultAddressController;
+use App\Http\Controllers\Settings\DefaultPaymentMethodController;
+use App\Http\Controllers\Settings\PaymentMethodController;
 use App\Http\Controllers\Settings\ProfileController;
 use App\Http\Controllers\Settings\SecurityController;
 use Illuminate\Auth\Middleware\RequirePassword;
@@ -33,6 +35,13 @@ Route::middleware(['auth', 'verified'])->group(function () {
 
     Route::patch('settings/addresses/{address}/default', DefaultAddressController::class)
         ->name('addresses.default');
+
+    Route::resource('settings/payment-methods', PaymentMethodController::class)
+        ->except(['show'])
+        ->names('payment-methods');
+
+    Route::patch('settings/payment-methods/{payment_method}/default', DefaultPaymentMethodController::class)
+        ->name('payment-methods.default');
 });
 
 Route::get('.well-known/passkey-endpoints', function () {

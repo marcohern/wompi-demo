@@ -7,6 +7,7 @@ import { useCurrentUrl } from '@/hooks/use-current-url';
 import { cn, toUrl } from '@/lib/utils';
 import { index as addresses } from '@/routes/addresses';
 import { edit as editAppearance } from '@/routes/appearance';
+import { index as paymentMethods } from '@/routes/payment-methods';
 import { edit } from '@/routes/profile';
 import { edit as editSecurity } from '@/routes/security';
 import type { NavItem } from '@/types';
@@ -30,6 +31,11 @@ const sidebarNavItems: NavItem[] = [
     {
         title: 'Addresses',
         href: addresses(),
+        icon: null,
+    },
+    {
+        title: 'Payment methods',
+        href: paymentMethods(),
         icon: null,
     },
 ];
