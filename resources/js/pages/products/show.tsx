@@ -1,5 +1,6 @@
 import { Head, Link } from '@inertiajs/react';
 import { ArrowLeft } from 'lucide-react';
+import AddToCartButton from '@/components/add-to-cart-button';
 import { Button } from '@/components/ui/button';
 import { formatPrice } from '@/lib/utils';
 import { index, show } from '@/routes/products';
@@ -28,6 +29,8 @@ export default function ProductShow({ product }: { product: Product }) {
                         <p className="text-xl font-medium">
                             {formatPrice(product.price)}
                         </p>
+
+                        <AddToCartButton product={product} />
 
                         <div>
                             <Button variant="outline" asChild>
