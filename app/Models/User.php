@@ -32,6 +32,7 @@ use Laravel\Fortify\TwoFactorAuthenticatable;
  * @property-read Cart|null $cart
  * @property-read Collection<int, Address> $addresses
  * @property-read Collection<int, PaymentMethod> $paymentMethods
+ * @property-read Collection<int, Order> $orders
  */
 #[Fillable(['name', 'email', 'password'])]
 #[Hidden(['password', 'two_factor_secret', 'two_factor_recovery_codes', 'remember_token'])]
@@ -68,6 +69,16 @@ class User extends Authenticatable implements PasskeyUser
     public function paymentMethods(): HasMany
     {
         return $this->hasMany(PaymentMethod::class);
+    }
+
+    /**
+     * Get the user's orders.
+     *
+     * @return HasMany<Order, $this>
+     */
+    public function orders(): HasMany
+    {
+        return $this->hasMany(Order::class);
     }
 
     /**

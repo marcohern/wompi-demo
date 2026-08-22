@@ -17,6 +17,10 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->encryptCookies(except: ['appearance', 'sidebar_state']);
 
+        // Wompi posts events server to server and cannot carry a CSRF token.
+        // The request is authenticated by its SHA256 checksum instead.
+        $middleware->validateCsrfTokens(except: ['wompi/events']);
+
         $middleware->web(append: [
             HandleAppearance::class,
             HandleInertiaRequests::class,

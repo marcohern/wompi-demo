@@ -33,7 +33,8 @@ test('authenticated users can see every product on the index', function () {
             ->has('products.0', fn (Assert $product) => $product
                 ->where('id', $products->last()->id)
                 ->where('title', $products->last()->title)
-                ->where('price', (float) $products->last()->price)
+                // Compared by value: JSON renders a whole float as an int.
+                ->where('price', fn ($price) => (float) $price === (float) $products->last()->price)
                 ->where('image_url', $products->last()->image_url),
             ),
         );
@@ -62,7 +63,7 @@ test('authenticated users can view a product details page', function () {
             ->component('products/show')
             ->where('product.id', $product->id)
             ->where('product.title', $product->title)
-            ->where('product.price', (float) $product->price)
+            ->where('product.price', fn ($price) => (float) $price === (float) $product->price)
             ->where('product.image_url', $product->image_url),
         );
 });

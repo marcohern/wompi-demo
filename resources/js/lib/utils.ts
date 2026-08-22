@@ -11,9 +11,12 @@ export function toUrl(url: NonNullable<InertiaLinkProps['href']>): string {
     return typeof url === 'string' ? url : url.url;
 }
 
-const priceFormatter = new Intl.NumberFormat('en-US', {
+// Wompi Colombia settles in Colombian pesos only, and COP is conventionally
+// written without decimals.
+const priceFormatter = new Intl.NumberFormat('es-CO', {
     style: 'currency',
-    currency: 'USD',
+    currency: 'COP',
+    maximumFractionDigits: 0,
 });
 
 export function formatPrice(price: number): string {

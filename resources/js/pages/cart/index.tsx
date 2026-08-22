@@ -1,9 +1,11 @@
 import { Head, Link } from '@inertiajs/react';
+import { CreditCard } from 'lucide-react';
 import CartItemRow from '@/components/cart-item-row';
 import Heading from '@/components/heading';
 import { Button } from '@/components/ui/button';
 import { formatPrice } from '@/lib/utils';
 import { index as cart } from '@/routes/cart';
+import { show as checkout } from '@/routes/checkout';
 import { index as products } from '@/routes/products';
 import type { CartItem } from '@/types';
 
@@ -42,7 +44,7 @@ export default function CartIndex({
                             ))}
                         </div>
 
-                        <div className="flex items-center justify-end gap-4 rounded-xl border border-sidebar-border/70 p-4 dark:border-sidebar-border">
+                        <div className="flex flex-wrap items-center justify-end gap-4 rounded-xl border border-sidebar-border/70 p-4 dark:border-sidebar-border">
                             <span className="text-sm text-muted-foreground">
                                 Total
                             </span>
@@ -50,6 +52,13 @@ export default function CartIndex({
                             <span className="text-xl font-semibold tabular-nums">
                                 {formatPrice(total)}
                             </span>
+
+                            <Button asChild>
+                                <Link href={checkout()}>
+                                    <CreditCard />
+                                    Checkout
+                                </Link>
+                            </Button>
                         </div>
                     </>
                 )}

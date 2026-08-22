@@ -24,7 +24,9 @@ class ProductFactory extends Factory
                 fake()->word(),
                 fake()->word(),
             ])),
-            'price' => fake()->randomFloat(2, 5, 500),
+            // Prices are Colombian pesos: Wompi settles in COP only, and its
+            // minimum charge is well above the few-dollar range.
+            'price' => fake()->randomFloat(0, 20_000, 500_000),
             'image_url' => sprintf(
                 'https://picsum.photos/seed/%d/400/300',
                 fake()->unique()->numberBetween(1, 1000),
