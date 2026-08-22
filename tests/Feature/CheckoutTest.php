@@ -180,6 +180,69 @@ test('paying redirects to wompi with a valid signature', function () {
         );
 });
 
+/*
+ | The pay button is an Inertia <Form>, so the browser submits over XHR. An
+ | ordinary 302 to an external host cannot be followed by an XHR visit, which
+ | is why the button appeared to do nothing. Inertia requires a 409 carrying
+ | X-Inertia-Location so the client performs a window.location visit instead.
+ |
+ | The plain-302 test above still passes because it sends no X-Inertia header,
+ | which is exactly how this shipped broken. These tests drive the real path.
+ */
+test('an inertia pay request returns a location redirect to wompi', function () {
+    $user = User::factory()->create();
+    cartWith($user, 100_000, 2);
+
+    $response = $this->actingAs($user)
+        ->withHeaders(['X-Inertia' => 'true'])
+        ->post(route('checkout.pay'));
+
+    $response->assertStatus(409);
+
+    $order = $user->orders()->sole();
+    $target = $response->headers->get('X-Inertia-Location');
+
+    expect($target)->toStartWith('https://checkout.co.uat.wompi.dev/p/?');
+
+    parse_str((string) parse_url((string) $target, PHP_URL_QUERY), $query);
+
+    expect($query['public-key'])->toBe('pub_stagtest_public')
+        ->and($query['currency'])->toBe('COP')
+        ->and($query['amount-in-cents'])->toBe('20000000')
+        ->and($query['reference'])->toBe($order->reference)
+        ->and($query['redirect-url'])->toBe(route('checkout.result'))
+        ->and($query['signature:integrity'])->toBe(
+            hash('sha256', $order->reference.'20000000'.'COP'.'stagtest_integrity_secret'),
+        );
+});
+
+test('an inertia pay request still records the order and its snapshot', function () {
+    $user = User::factory()->create();
+    cartWith($user, 100_000, 2);
+
+    $this->actingAs($user)
+        ->withHeaders(['X-Inertia' => 'true'])
+        ->post(route('checkout.pay'));
+
+    $order = $user->orders()->sole();
+
+    expect($order->status)->toBe(OrderStatus::Pending)
+        ->and($order->amount_in_cents)->toBe(20_000_000)
+        ->and($order->items)->toHaveCount(1)
+        ->and($order->items->first()->title)->toBe('Test Product');
+});
+
+test('an inertia pay request with an empty cart redirects instead of leaving the app', function () {
+    $user = User::factory()->create();
+
+    $this->actingAs($user)
+        ->withHeaders(['X-Inertia' => 'true'])
+        ->post(route('checkout.pay'))
+        ->assertRedirect(route('products.index'));
+
+    expect(Order::count())->toBe(0);
+});
+
 test('an approved return marks the order paid and empties the cart', function () {
     $user = User::factory()->create();
     cartWith($user, 100_000, 2);

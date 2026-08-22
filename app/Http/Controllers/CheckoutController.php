@@ -3,7 +3,6 @@
 namespace App\Http\Controllers;
 
 use App\Enums\OrderStatus;
-use App\Models\Cart;
 use App\Models\CartItem;
 use App\Models\Order;
 use App\Services\WompiGateway;
@@ -13,6 +12,7 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
 use Inertia\Response;
+use Symfony\Component\HttpFoundation\Response as SymfonyResponse;
 
 class CheckoutController extends Controller
 {
@@ -23,7 +23,7 @@ class CheckoutController extends Controller
      */
     public function show(Request $request): Response|RedirectResponse
     {
-        $items = $this->cartItems($request);
+        $items = $request->user()->cartItems();
 
         if ($items->isEmpty()) {
             Inertia::flash('toast', ['type' => 'warning', 'message' => __('Your cart is empty.')]);
@@ -54,9 +54,9 @@ class CheckoutController extends Controller
      * The amount and the integrity signature are both derived here rather than
      * submitted by the browser, so neither can be tampered with.
      */
-    public function pay(Request $request): RedirectResponse
+    public function pay(Request $request): SymfonyResponse
     {
-        $items = $this->cartItems($request);
+        $items = $request->user()->cartItems();
 
         if ($items->isEmpty()) {
             Inertia::flash('toast', ['type' => 'warning', 'message' => __('Your cart is empty.')]);
@@ -86,7 +86,11 @@ class CheckoutController extends Controller
             return $order;
         });
 
-        return redirect()->away(
+        // Inertia::location, not redirect()->away: the pay button submits over
+        // XHR, and an XHR visit cannot follow a 302 to another host. This
+        // returns a 409 with X-Inertia-Location so the client performs a full
+        // window.location visit to Wompi.
+        return Inertia::location(
             $this->wompi->checkoutUrl($order, route('checkout.result')),
         );
     }
@@ -153,22 +157,6 @@ class CheckoutController extends Controller
                 $order->user->cart?->items()->delete();
             }
         });
-    }
-
-    /**
-     * Get the authenticated user's cart lines with their products loaded.
-     *
-     * @return Collection<int, CartItem>
-     */
-    private function cartItems(Request $request): Collection
-    {
-        $cart = $request->user()->cart;
-
-        if (! $cart instanceof Cart) {
-            return collect();
-        }
-
-        return $cart->items()->with('product')->oldest('id')->get();
     }
 
     /**
