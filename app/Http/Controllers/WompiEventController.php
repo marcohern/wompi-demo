@@ -45,6 +45,11 @@ class WompiEventController extends Controller
         $order = Order::query()->where('reference', $reference)->first();
 
         if (! $order instanceof Order) {
+            Log::warning('Received a Wompi event for an unknown reference.', [
+                'reference' => $reference,
+                'order_id' => Order::idFromReference($reference),
+            ]);
+
             return response()->json(['received' => true]);
         }
 

@@ -66,11 +66,16 @@ class CheckoutController extends Controller
 
         $order = DB::transaction(function () use ($request, $items): Order {
             $order = $request->user()->orders()->create([
-                'reference' => Order::newReference(),
+                'reference' => Order::placeholderReference(),
                 'amount_in_cents' => (int) round($this->total($items) * 100),
                 'currency' => (string) config('wompi.currency'),
                 'status' => OrderStatus::Pending,
             ]);
+
+            // The reference carries the order id, which only exists once the
+            // row is inserted. Still inside the transaction, so the placeholder
+            // is never visible outside it.
+            $order->assignReference();
 
             // Snapshot each line so the order total never moves when a
             // product is re-priced or removed from the catalog.
@@ -100,24 +105,33 @@ class CheckoutController extends Controller
      */
     public function result(Request $request): Response|RedirectResponse
     {
+        $order = $this->orderFromRequest($request);
         $transactionId = $request->query('id');
-        $order = null;
 
         if (is_string($transactionId) && $transactionId !== '') {
             $transaction = $this->wompi->transaction($transactionId);
 
             if ($transaction !== null) {
-                $order = $request->user()
+                $reference = (string) ($transaction['reference'] ?? '');
+
+                // Without an order_id the reference is the only way back to the
+                // order. Scoped to the user either way, so one customer can
+                // never settle another's order.
+                $order ??= $request->user()
                     ->orders()
-                    ->where('reference', $transaction['reference'] ?? '')
+                    ->where('reference', $reference)
                     ->first();
 
-                if ($order instanceof Order) {
+                // A mismatch means order_id and the transaction disagree; trust
+                // neither rather than settling the wrong order.
+                if ($order instanceof Order && $order->reference === $reference) {
                     $this->settle($order, (string) ($transaction['status'] ?? ''), $transactionId);
                 }
             }
         }
 
+        // An order resolved from order_id is still worth rendering when the
+        // lookup failed -- the webhook may have already settled it.
         if (! $order instanceof Order) {
             Inertia::flash('toast', ['type' => 'error', 'message' => __('We could not find that payment.')]);
 
@@ -134,6 +148,21 @@ class CheckoutController extends Controller
                 'transaction_id' => $order->wompi_transaction_id,
             ],
         ]);
+    }
+
+    /**
+     * Resolve the order named by the order_id Wompi carried back on the
+     * redirect URL, scoped to the authenticated customer.
+     */
+    private function orderFromRequest(Request $request): ?Order
+    {
+        $orderId = $request->query('order_id');
+
+        if (! is_string($orderId) || ! ctype_digit($orderId)) {
+            return null;
+        }
+
+        return $request->user()->orders()->find((int) $orderId);
     }
 
     /**

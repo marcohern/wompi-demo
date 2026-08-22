@@ -34,11 +34,55 @@ class Order extends Model
     use HasFactory;
 
     /**
-     * Generate a unique payment reference for a new order.
+     * Prefix marking a reference that is still waiting for the order's id.
      */
-    public static function newReference(): string
+    public const PLACEHOLDER_PREFIX = 'PENDING-';
+
+    /**
+     * Generate the payment reference for an order.
+     *
+     * The id is embedded so every Wompi event, dashboard row and log line names
+     * the order it belongs to without a database round trip. The random suffix
+     * keeps the reference unguessable and lets a single order be re-attempted
+     * under a fresh reference later.
+     */
+    public static function newReference(int $id): string
     {
-        return 'WOMPI-'.now()->format('YmdHis').'-'.Str::upper(Str::random(8));
+        return 'WOMPI-'.$id.'-'.Str::upper(Str::random(8));
+    }
+
+    /**
+     * Generate the throwaway reference an order is inserted with.
+     *
+     * The column is unique and not nullable, but the id only exists after the
+     * insert, so a row is created with this and immediately given its real
+     * reference inside the same transaction.
+     */
+    public static function placeholderReference(): string
+    {
+        return self::PLACEHOLDER_PREFIX.Str::uuid();
+    }
+
+    /**
+     * Read the order id out of a payment reference.
+     *
+     * Diagnostics only -- the unique reference stays the source of truth when
+     * resolving an order. Returns null for anything not in our format.
+     */
+    public static function idFromReference(string $reference): ?int
+    {
+        return preg_match('/^WOMPI-(\d+)-/', $reference, $matches) === 1
+            ? (int) $matches[1]
+            : null;
+    }
+
+    /**
+     * Replace this order's placeholder reference with its real one.
+     */
+    public function assignReference(): void
+    {
+        $this->reference = self::newReference($this->id);
+        $this->save();
     }
 
     /**

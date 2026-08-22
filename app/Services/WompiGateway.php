@@ -28,10 +28,26 @@ class WompiGateway
                 $order->amount_in_cents,
                 $order->currency,
             ),
-            'redirect-url' => $this->redirectUrl($redirectUrl),
+            'redirect-url' => $this->redirectUrlFor($order, $redirectUrl),
         ]);
 
         return rtrim((string) config('wompi.checkout_url'), '?').'?'.$query;
+    }
+
+    /**
+     * Resolve the return address and tag it with the order it belongs to.
+     *
+     * Wompi keeps whatever query string "redirect-url" already carries and
+     * appends its own "id" and "env", so the order id survives the return trip
+     * and the result page can find the order without depending on the
+     * transaction lookup succeeding. Applied after the configured override is
+     * resolved so a tunnel URL is tagged too.
+     */
+    private function redirectUrlFor(Order $order, string $fallback): string
+    {
+        $url = $this->redirectUrl($fallback);
+
+        return $url.(str_contains($url, '?') ? '&' : '?').'order_id='.$order->id;
     }
 
     /**

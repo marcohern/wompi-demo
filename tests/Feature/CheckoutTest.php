@@ -150,6 +150,33 @@ test('paying creates a pending order with a snapshot of the cart', function () {
         ->and($item->quantity)->toBe(2);
 });
 
+/*
+ | Wompi's Web Checkout drops any query parameter outside its documented set,
+ | so "reference" is the only field that comes back on a webhook event. The
+ | order id is embedded in it to keep every event traceable to an order.
+ */
+test('the payment reference carries the order id', function () {
+    $user = User::factory()->create();
+    cartWith($user, 100_000, 2);
+
+    $this->actingAs($user)->post(route('checkout.pay'));
+
+    $order = $user->orders()->sole();
+
+    expect($order->reference)->toMatch('/^WOMPI-'.$order->id.'-[A-Z0-9]{8}$/')
+        ->and(Order::idFromReference($order->reference))->toBe($order->id)
+        ->and($order->reference)->not->toStartWith(Order::PLACEHOLDER_PREFIX);
+});
+
+test('a reference outside our format yields no order id', function (string $reference) {
+    expect(Order::idFromReference($reference))->toBeNull();
+})->with([
+    'foreign' => 'not-ours',
+    'placeholder' => Order::PLACEHOLDER_PREFIX.'0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b',
+    'non numeric id' => 'WOMPI-ABC-ABCD1234',
+    'empty' => '',
+]);
+
 test('the order snapshot survives a later price change', function () {
     $user = User::factory()->create();
     $cartItem = cartWith($user, 100_000, 2);
@@ -181,7 +208,7 @@ test('paying redirects to wompi with a valid signature', function () {
         ->and($query['currency'])->toBe('COP')
         ->and($query['amount-in-cents'])->toBe('20000000')
         ->and($query['reference'])->toBe($order->reference)
-        ->and($query['redirect-url'])->toBe(route('checkout.result'))
+        ->and($query['redirect-url'])->toBe(route('checkout.result').'?order_id='.$order->id)
         ->and($query['signature:integrity'])->toBe(
             hash('sha256', $order->reference.'20000000'.'COP'.'stagtest_integrity_secret'),
         );
@@ -217,7 +244,7 @@ test('an inertia pay request returns a location redirect to wompi', function () 
         ->and($query['currency'])->toBe('COP')
         ->and($query['amount-in-cents'])->toBe('20000000')
         ->and($query['reference'])->toBe($order->reference)
-        ->and($query['redirect-url'])->toBe(route('checkout.result'))
+        ->and($query['redirect-url'])->toBe(route('checkout.result').'?order_id='.$order->id)
         ->and($query['signature:integrity'])->toBe(
             hash('sha256', $order->reference.'20000000'.'COP'.'stagtest_integrity_secret'),
         );
@@ -256,7 +283,7 @@ test('a non loopback redirect url is accepted', function (string $redirectUrl) {
 
     parse_str((string) parse_url($target, PHP_URL_QUERY), $query);
 
-    expect($query['redirect-url'])->toBe($redirectUrl);
+    expect($query['redirect-url'])->toBe($redirectUrl.'?order_id='.$order->id);
 })->with([
     // A subdomain of localhost resolves to 127.0.0.1 in the browser but passes
     // the WAF, which is why the app is browsed there rather than at localhost.
@@ -274,12 +301,13 @@ test('the configured redirect url overrides the route', function () {
         ->withHeaders(['X-Inertia' => 'true'])
         ->post(route('checkout.pay'));
 
+    $order = $user->orders()->sole();
     $target = $response->headers->get('X-Inertia-Location');
 
     parse_str((string) parse_url((string) $target, PHP_URL_QUERY), $query);
 
-    expect($query['redirect-url'])->toBe('https://abc123.ngrok-free.app/checkout/result')
-        ->and($query['redirect-url'])->not->toBe(route('checkout.result'));
+    expect($query['redirect-url'])->toBe('https://abc123.ngrok-free.app/checkout/result?order_id='.$order->id)
+        ->and($query['redirect-url'])->not->toStartWith(route('checkout.result'));
 });
 
 test('an inertia pay request still records the order and its snapshot', function () {
@@ -319,7 +347,7 @@ test('an approved return marks the order paid and empties the cart', function ()
     Http::fake(['*' => Http::response(transactionResponse($order->reference))]);
 
     $this->actingAs($user)
-        ->get(route('checkout.result', ['id' => 'txn-123']))
+        ->get(route('checkout.result', ['id' => 'txn-123', 'order_id' => $order->id]))
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page
             ->component('checkout/result')
@@ -345,7 +373,7 @@ test('a declined return leaves the cart intact', function () {
     Http::fake(['*' => Http::response(transactionResponse($order->reference, 'DECLINED'))]);
 
     $this->actingAs($user)
-        ->get(route('checkout.result', ['id' => 'txn-123']))
+        ->get(route('checkout.result', ['id' => 'txn-123', 'order_id' => $order->id]))
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page->where('order.is_paid', false));
 
@@ -370,7 +398,62 @@ test('another users order cannot be settled through the result page', function (
         ->get(route('checkout.result', ['id' => 'txn-123']))
         ->assertRedirect(route('products.index'));
 
+    // The order id now rides on the redirect URL, so it is guessable. The
+    // per-user scope, not the obscurity of the reference, is what stops this.
+    $this->actingAs($intruder)
+        ->get(route('checkout.result', ['id' => 'txn-123', 'order_id' => $order->id]))
+        ->assertRedirect(route('products.index'));
+
     expect($order->fresh()->status)->toBe(OrderStatus::Pending);
+});
+
+test('a result whose order id disagrees with the transaction settles nothing', function () {
+    $user = User::factory()->create();
+    cartWith($user, 100_000, 2);
+    $this->actingAs($user)->post(route('checkout.pay'));
+    $order = $user->orders()->sole();
+
+    $other = Order::factory()->create(['user_id' => $user->id]);
+
+    Http::fake(['*' => Http::response(transactionResponse($other->reference))]);
+
+    $this->actingAs($user)
+        ->get(route('checkout.result', ['id' => 'txn-123', 'order_id' => $order->id]))
+        ->assertOk();
+
+    expect($order->fresh()->status)->toBe(OrderStatus::Pending)
+        ->and($other->fresh()->status)->toBe(OrderStatus::Pending);
+});
+
+test('a result falls back to the order id when the transaction lookup fails', function () {
+    $user = User::factory()->create();
+    cartWith($user, 100_000, 2);
+    $this->actingAs($user)->post(route('checkout.pay'));
+    $order = $user->orders()->sole();
+
+    // The webhook got there first; the customer's return trip then finds Wompi
+    // unreachable. The order is still theirs to see.
+    $this->postJson(route('wompi.events'), eventFor($order->reference))->assertOk();
+
+    Http::fake(['*' => Http::response([], 500)]);
+
+    $this->actingAs($user)
+        ->get(route('checkout.result', ['id' => 'txn-123', 'order_id' => $order->id]))
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->component('checkout/result')
+            ->where('order.reference', $order->reference)
+            ->where('order.status', 'approved')
+            ->where('order.is_paid', true),
+        );
+});
+
+test('a result for an unknown order id redirects away', function () {
+    $user = User::factory()->create();
+
+    $this->actingAs($user)
+        ->get(route('checkout.result', ['order_id' => 999_999]))
+        ->assertRedirect(route('products.index'));
 });
 
 test('a result without a transaction id redirects away', function () {
